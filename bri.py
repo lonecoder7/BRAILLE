@@ -223,7 +223,7 @@ def load_summarizer():
 def extract_text_with_gemini(image):
     try:
         genai.configure(api_key=API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash') 
+        model = genai.GenerativeModel('gemini-flash-latest') 
         for _ in range(3):
             try:
                 response = model.generate_content(["Extract text exactly.", image])
