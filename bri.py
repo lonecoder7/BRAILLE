@@ -12,21 +12,21 @@ import io
 from PIL import Image
 import streamlit.components.v1 as components
 
-API_KEY = st.secrets.get("GEMINI_API_KEY", None)
-# --------------------------------
-
 # --- 1. CONFIGURATION & INTERACTIVE THEME ---
 st.set_page_config(
-    page_title="NeuralSense", 
-    page_icon="🧠", 
+    page_title="SenseBridge", 
+    page_icon="⠇⠇", 
     layout="wide", 
     initial_sidebar_state="collapsed"
 )
 
+# --- SECURE API KEY RETRIEVAL ---
+# Updates: Checks for 'GOOGLE_API_KEY' in secrets.toml
+API_KEY = st.secrets.get("GOOGLE_API_KEY", None)
+
 st.markdown("""
     <style>
     /* 1. INTERACTIVE "NEURAL MESH" BACKGROUND */
-    /* This creates a moving, breathing gradient background */
     @keyframes gradient-animation {
         0% { background-position: 0% 50%; }
         50% { background-position: 100% 50%; }
@@ -40,7 +40,7 @@ st.markdown("""
         color: #e0e0e0;
     }
 
-    /* 2. GLASSMORPHISM CARDS (Mobile Responsive) */
+    /* 2. GLASSMORPHISM CARDS */
     .sentinel-card {
         background: rgba(20, 20, 20, 0.7);
         backdrop-filter: blur(12px);
@@ -53,7 +53,6 @@ st.markdown("""
         transition: transform 0.2s ease;
     }
     
-    /* On Desktop, hover effects. On Mobile, we disable hover lift to prevent sticky touches */
     @media (hover: hover) {
         .sentinel-card:hover {
             transform: translateY(-5px);
@@ -95,26 +94,24 @@ st.markdown("""
     }
 
     .braille-display {
-        font-size: 2.5rem; /* Slightly smaller for mobile safety */
+        font-size: 2.5rem; 
         letter-spacing: 2px;
         font-weight: bold;
         color: #fff;
         text-align: center;
         margin: 15px 0;
         text-shadow: 0 0 15px rgba(255,255,255,0.5);
-        word-wrap: break-word; /* Prevents overflow on small screens */
+        word-wrap: break-word; 
     }
 
     /* 5. MOBILE OPTIMIZATIONS */
     @media (max-width: 768px) {
-        .braille-display { font-size: 1.8rem; } /* Smaller braille on phone */
+        .braille-display { font-size: 1.8rem; } 
         .card-title { font-size: 1rem; }
-        .stButton button { width: 100%; } /* Full width buttons on mobile */
+        .stButton button { width: 100%; } 
     }
 
-    /* Hide Streamlit UI garbage */
     #MainMenu, footer, header {visibility: hidden;}
-    
     </style>
 """, unsafe_allow_html=True)
 
@@ -122,10 +119,10 @@ st.markdown("""
 st.markdown("""
     <div style="text-align: center; margin-bottom: 30px;">
         <h1 style="font-size: 3.5rem; margin: 0; background: linear-gradient(to right, #8be9fd, #bd93f9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0px 0px 10px rgba(139,233,253,0.3));">
-            NeuralSense
+            SenseBridge
         </h1>
         <p style="font-size: 1.1rem; color: #b0b0b0; font-style: italic;">
-            AI-Powered Accessibility for Vision & Touch
+            Qwen-2 VL centered assistive Platform
         </p>
     </div>
 """, unsafe_allow_html=True)
@@ -192,7 +189,7 @@ def generate_morse_audio(text):
         else:
             add_silence(0.1)
 
-    if not audio_buffer: return "" # Handle empty audio
+    if not audio_buffer: return ""
     audio_np = np.array(audio_buffer)
     audio_int16 = np.int16(audio_np * 32767)
     virtual_file = io.BytesIO()
@@ -226,7 +223,7 @@ def load_summarizer():
 def extract_text_with_gemini(image):
     try:
         genai.configure(api_key=API_KEY)
-        model = genai.GenerativeModel('gemini-flash-latest') 
+        model = genai.GenerativeModel('gemini-1.5-flash') 
         for _ in range(3):
             try:
                 response = model.generate_content(["Extract text exactly.", image])
@@ -290,7 +287,6 @@ def render_karaoke_player(summary_text, audio_b64):
         }};
     </script>
     """
-    # Height set to auto to accommodate mobile scrolling
     components.html(html, height=400, scrolling=True)
 
 def inject_navigation():
@@ -308,10 +304,10 @@ def inject_navigation():
 uploaded_file = st.file_uploader("📂 Upload Document", type=["jpg", "png"], label_visibility="collapsed")
 
 if uploaded_file:
-    if "PASTE_YOUR" in API_KEY:
-        st.error("⚠️ Please insert your Gemini API Key in the code!")
+    # --- FIXED: SAFE API KEY CHECK ---
+    if not API_KEY or "PASTE_YOUR" in API_KEY:
+        st.error("⚠️ **API Key Missing!** Please add `GOOGLE_API_KEY` to your `.streamlit/secrets.toml` file.")
     else:
-        # Use columns for layout, but on mobile they will just stack
         col_img, col_act = st.columns([1, 2])
         
         with col_img:
@@ -323,7 +319,6 @@ if uploaded_file:
         
         with col_act:
             st.write(" ") 
-            # Primary Action Button
             if st.button("🚀 Analyze & Neural Processing", type="primary", use_container_width=True):
                 with st.spinner("Processing neural layers..."):
                     raw = extract_text_with_gemini(img)
@@ -341,7 +336,6 @@ if uploaded_file:
 if st.session_state.get('complete'):
     inject_navigation()
     
-    # Result Grid: 2 Columns on Desktop, Stacks on Mobile
     c1, c2 = st.columns(2)
 
     with c1:
@@ -357,7 +351,6 @@ if st.session_state.get('complete'):
         render_karaoke_player(st.session_state.full_sum, tts_b64)
 
     with c2:
-        # State Management
         total = len(st.session_state.sents)
         idx = st.session_state.current_sentence_index
         cur_sent = st.session_state.sents[idx] if total > 0 else "Processing..."
@@ -383,7 +376,7 @@ if st.session_state.get('complete'):
             use_container_width=True
         )
 
-        # Card D: Audio & Navigation
+        # Card D: Audio
         st.markdown(f"""<div class="sentinel-card border-red"><div class="card-title text-red">🔊 Audio Output</div>""", unsafe_allow_html=True)
         
         tab1, tab2 = st.tabs(["🗣️ Voice", "📟 Beep Code"])
@@ -396,7 +389,7 @@ if st.session_state.get('complete'):
             morse_b64 = generate_morse_audio(cur_sent)
             st.markdown(f'<audio src="data:audio/wav;base64,{morse_b64}" controls style="width:100%;"></audio>', unsafe_allow_html=True)
 
-        # Navigation Buttons (Full width for easy tapping)
+        # Navigation
         st.write("---")
         cp, cn = st.columns(2)
         with cp: 
