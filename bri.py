@@ -216,7 +216,7 @@ def load_summarizer():
     
     def summarizer(text):
         inputs = tokenizer([text], max_length=1024, return_tensors='pt', truncation=True)
-        summary_ids = model.generate(inputs['input_ids'], max_length=200, min_length=50, do_sample=False)
+        summary_ids = model.generate(inputs['input_ids'], max_length=200, min_length=20, do_sample=False)
         return tokenizer.decode(summary_ids[0], skip_special_tokens=True)
     return summarizer
 
