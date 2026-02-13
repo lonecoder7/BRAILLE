@@ -1,9 +1,9 @@
 streamlit
 google-generativeai
 transformers
-torch  # Required by transformers
+torch
 gTTS
 numpy
 scipy
 Pillow
-python-dotenv
+sentencepiece
