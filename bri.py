@@ -123,7 +123,7 @@ def extract_text_with_gemini(image, mode):
     """
     try:
         genai.configure(api_key=API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash') 
+        model = genai.GenerativeModel('gemini-flash-latest') 
         
         if mode == 'reading':
             # Dyslexia-friendly Prompt
