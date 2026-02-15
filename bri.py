@@ -1,13 +1,10 @@
 import streamlit as st
 import google.generativeai as genai
-from transformers import BartTokenizer, BartForConditionalGeneration
 from gtts import gTTS
 import base64
 import os
 import re
 import time
-import numpy as np
-from scipy.io.wavfile import write
 import io
 from PIL import Image
 import streamlit.components.v1 as components
@@ -24,31 +21,24 @@ st.set_page_config(
 API_KEY = st.secrets.get("GOOGLE_API_KEY", None)
 
 # --- SESSION STATE INITIALIZATION ---
-if 'mode' not in st.session_state: st.session_state.mode = None # 'visual', 'reading', or None
+if 'mode' not in st.session_state: st.session_state.mode = None 
 if 'current_sentence_index' not in st.session_state: st.session_state.current_sentence_index = 0
 if 'summary_sentences' not in st.session_state: st.session_state.summary_sentences = []
 if 'raw_text' not in st.session_state: st.session_state.raw_text = ""
 if 'full_summary' not in st.session_state: st.session_state.full_summary = ""
 if 'processing_complete' not in st.session_state: st.session_state.processing_complete = False
 
-# --- 2. CSS GENERATORS (ADAPTIVE THEMES) ---
+# --- 2. CSS GENERATORS ---
 
 def inject_visual_mode_css():
     st.markdown("""
     <style>
-    /* DEEP NEURAL THEME (Visual Impairment Optimized) */
-    @keyframes gradient-animation {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
-    }
+    /* DEEP NEURAL THEME */
     .stApp {
         background: linear-gradient(-45deg, #020024, #090979, #1c002e, #004e92);
         background-size: 400% 400%;
-        animation: gradient-animation 15s ease infinite;
         color: #e0e0e0;
     }
-    /* Glassmorphism */
     .sentinel-card {
         background: rgba(20, 20, 20, 0.7);
         backdrop-filter: blur(12px);
@@ -70,63 +60,46 @@ def inject_visual_mode_css():
 def inject_reading_mode_css():
     st.markdown("""
     <style>
-    /* DYSLEXIA FRIENDLY THEME */
     @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;600&display=swap');
-    
     .stApp {
-        background-color: #f7f3e9; /* Soft Cream Background */
-        color: #1a1a1a; /* Dark Grey Text (Not harsh black) */
+        background-color: #f7f3e9;
+        color: #1a1a1a;
         font-family: 'Lexend', sans-serif !important;
     }
-    
-    /* Reading Card */
     .reading-card {
         background-color: #ffffff;
         border-radius: 12px;
         padding: 30px;
         margin-bottom: 25px;
-        box-shadow: 4px 4px 0px #2c3e50; /* Solid shadow for stability */
+        box-shadow: 4px 4px 0px #2c3e50;
         border: 2px solid #2c3e50;
         color: #000;
     }
-    
-    h1, h2, h3 {
-        font-family: 'Lexend', sans-serif !important;
-        letter-spacing: 0.05em;
-        color: #004085;
-    }
-    
-    p, li, div {
-        font-size: 1.2rem !important; /* Larger text */
-        line-height: 1.8 !important;  /* Increased line spacing */
-        letter-spacing: 0.02em;
-        word-spacing: 0.05em;
-    }
-    
-    .highlight-box {
-        background-color: #fff3cd;
-        border-left: 6px solid #ffc107;
-        padding: 15px;
-        margin: 10px 0;
-        font-weight: 500;
-    }
-    
+    h1, h2, h3 { font-family: 'Lexend', sans-serif !important; color: #004085; }
+    p, li, div { font-size: 1.2rem !important; line-height: 1.8 !important; }
     #MainMenu, footer, header {visibility: hidden;}
     </style>
     """, unsafe_allow_html=True)
 
 # --- 3. HELPER FUNCTIONS ---
 
+def clean_text_for_audio(text):
+    """
+    Removes Markdown symbols so TTS reads smoothly.
+    Converts '* Item' to 'Item' and removes headers/bolding chars.
+    """
+    # Remove asterisks, hashes, dashes used for bullets
+    clean = re.sub(r'[*#•-]', ' ', text)
+    # Remove multiple spaces
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    return clean
+
 def extract_text_with_gemini(image, mode):
-    """
-    Adaptive AI Processing based on Accessibility Mode.
-    """
     try:
         genai.configure(api_key=API_KEY)
         model = genai.GenerativeModel('gemini-flash-latest') 
         
         if mode == 'reading':
-            # Dyslexia-friendly Prompt
             prompt = """
             You are an assistive reading assistant.
             1. Extract the text from the image.
@@ -142,7 +115,6 @@ def extract_text_with_gemini(image, mode):
             (The simplified bullet-point version)
             """
         else:
-            # Visual Impairment Prompt
             prompt = """
             You are an assistive reader for the visually impaired.
             1. Extract the text exactly.
@@ -164,13 +136,12 @@ def extract_text_with_gemini(image, mode):
                     return parts[0].replace("[EXTRACTED]", "").strip(), parts[1].strip()
                 return text, text 
             except Exception as e:
-                if "429" in str(e): time.sleep(4); continue
-                return f"Error: {str(e)}", ""
+                time.sleep(2)
+                continue
         return "Error: Server busy.", ""
     except Exception as e:
         return f"Error: {str(e)}", ""
 
-# [Existing Audio/Braille logic reused for Visual Mode]
 braille_map = {
     "a": "⠁", "b": "⠃", "c": "⠉", "d": "⠙", "e": "⠑", "f": "⠋", "g": "⠛", "h": "⠓", "i": "⠊", "j": "⠚",
     "k": "⠅", "l": "⠇", "m": "⠍", "n": "⠝", "o": "⠕", "p": "⠏", "q": "⠟", "r": "⠗", "s": "⠎", "t": "⠞",
@@ -181,7 +152,11 @@ def translate_to_braille(text):
 
 def text_to_tts_audio(text):
     try:
-        tts = gTTS(text=text, lang='en')
+        # CLEAN THE TEXT BEFORE SENDING TO TTS
+        safe_text = clean_text_for_audio(text)
+        if not safe_text: return ""
+        
+        tts = gTTS(text=safe_text, lang='en')
         filename = "temp_tts.mp3"
         tts.save(filename)
         with open(filename, "rb") as f:
@@ -189,34 +164,45 @@ def text_to_tts_audio(text):
         return b64
     except: return ""
 
-def generate_morse_audio(text):
-    # (Simplified for brevity, same logic as before)
-    return text_to_tts_audio(text) # Fallback if numpy issues, or use full function from prev code
-
-# --- 4. JS COMPONENTS ---
+# --- 4. JS COMPONENTS (FIXED COMMANDS) ---
 
 def inject_gesture_interface():
-    """Only for Visual Mode"""
+    """
+    Visual Mode Interface with Voice & Gestures.
+    Fixed: 'Read', 'Next', 'Prev' commands.
+    """
     js_code = """
     <div id="gesture-layer" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9999; background: rgba(0,0,0,0.01); touch-action: none;"></div>
     <script>
     const layer = document.getElementById('gesture-layer');
     let lastTap = 0; let touchStartY = 0;
     
-    // Voice Command (Simplified)
+    // Voice Command Engine
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
-        recognition.continuous = true; recognition.lang = 'en-US';
+        recognition.continuous = true; 
+        recognition.lang = 'en-US';
+        
         recognition.onresult = function(e) {
             const cmd = e.results[e.results.length - 1][0].transcript.trim().toLowerCase();
+            console.log("Command received:", cmd);
+            
             if (cmd.includes('scan') || cmd.includes('analyze')) triggerAction('upload');
-            if (cmd.includes('read') || cmd.includes('start')) triggerAction('play');
-            if (cmd.includes('stop')) triggerAction('pause');
+            
+            // FIXED: 'Read' or 'Start' triggers the audio player
+            if (cmd.includes('read') || cmd.includes('start') || cmd.includes('play')) triggerAction('play');
+            
+            if (cmd.includes('stop') || cmd.includes('pause')) triggerAction('pause');
+            
+            // FIXED: 'Next' and 'Previous' looking for buttons
+            if (cmd.includes('next') || cmd.includes('forward')) triggerAction('next');
+            if (cmd.includes('previous') || cmd.includes('back')) triggerAction('prev');
         };
         try { recognition.start(); } catch(e) {}
     }
 
+    // Gestures
     layer.addEventListener('click', function(e) {
         const now = new Date().getTime();
         if (now - lastTap < 500 && now - lastTap > 0) { triggerAction('pause'); e.preventDefault(); }
@@ -231,9 +217,17 @@ def inject_gesture_interface():
     function triggerAction(action) {
         const btns = window.parent.document.querySelectorAll('button');
         const audio = window.parent.document.querySelector('audio');
+        
+        // Button Logic
         if (action === 'upload') btns.forEach(b => { if(b.innerText.includes('Analyze')) b.click(); });
+        
+        if (action === 'next') btns.forEach(b => { if(b.innerText.toLowerCase().includes('next')) b.click(); });
+        if (action === 'prev') btns.forEach(b => { if(b.innerText.toLowerCase().includes('prev')) b.click(); });
+
+        // Audio Logic
         if (action === 'play' && audio) audio.play();
         if (action === 'pause' && audio) audio.paused ? audio.play() : audio.pause();
+        
         if (navigator.vibrate) navigator.vibrate(50);
     }
     </script>
@@ -241,8 +235,10 @@ def inject_gesture_interface():
     components.html(js_code, height=0, width=0)
 
 def render_karaoke_player(summary_text, audio_b64, mode='visual'):
-    words = summary_text.split()
-    # Colors adapt based on mode
+    # We clean text for display if in reading mode to match audio
+    display_text = summary_text.replace("*", "").replace("#", "")
+    words = display_text.split()
+    
     highlight_color = "#f1c40f" if mode == 'visual' else "#ffc107"
     text_color = "#ccc" if mode == 'visual' else "#000"
     
@@ -262,7 +258,8 @@ def render_karaoke_player(summary_text, audio_b64, mode='visual'):
             if(aud.duration>0){{
                 var idx = Math.floor((aud.currentTime/aud.duration)*len);
                 for(var i=0;i<len;i++) {{
-                    document.getElementById("w_"+i).style.backgroundColor = "transparent";
+                    var word = document.getElementById("w_"+i);
+                    if(word) word.style.backgroundColor = "transparent";
                 }}
                 var el = document.getElementById("w_"+idx);
                 if(el) el.style.backgroundColor = "{highlight_color}";
@@ -272,10 +269,9 @@ def render_karaoke_player(summary_text, audio_b64, mode='visual'):
     """
     components.html(html, height=400, scrolling=True)
 
-# --- 5. INTERFACE LAYOUTS ---
+# --- 5. INTERFACES ---
 
 def show_mode_selection():
-    """Initial Landing Screen"""
     st.markdown("""
     <style>
     .mode-btn { width: 100%; padding: 40px; font-size: 24px; border-radius: 15px; cursor: pointer; border: none; margin-bottom: 20px; transition: transform 0.2s;}
@@ -298,9 +294,8 @@ def show_mode_selection():
             st.rerun()
 
 def show_visual_interface():
-    """Mode 1: The Original 'Dark' Interface"""
     inject_visual_mode_css()
-    inject_gesture_interface() # Enable gestures only here
+    inject_gesture_interface()
     
     st.markdown('<div style="text-align: center; margin-bottom: 20px;"><h2>👁️ Visual Assist Active</h2></div>', unsafe_allow_html=True)
     
@@ -341,13 +336,13 @@ def show_visual_interface():
             """, unsafe_allow_html=True)
             
             c_p, c_n = st.columns(2)
-            if c_p.button("Prev"): 
+            # IMPORTANT: Text must match JS logic 'Prev' and 'Next'
+            if c_p.button("⬅️ Prev"): 
                 if idx > 0: st.session_state.current_sentence_index -= 1; st.rerun()
-            if c_n.button("Next"): 
+            if c_n.button("Next ➡️"): 
                 if idx < len(st.session_state.summary_sentences)-1: st.session_state.current_sentence_index += 1; st.rerun()
 
 def show_reading_interface():
-    """Mode 2: The New 'Cream' Interface"""
     inject_reading_mode_css()
     
     st.markdown('<div style="text-align: center; margin-bottom: 20px; color: #004085;"><h2>📖 Reading Assist Active</h2></div>', unsafe_allow_html=True)
