@@ -27,6 +27,7 @@ if 'summary_sentences' not in st.session_state: st.session_state.summary_sentenc
 if 'raw_text' not in st.session_state: st.session_state.raw_text = ""
 if 'full_summary' not in st.session_state: st.session_state.full_summary = ""
 if 'processing_complete' not in st.session_state: st.session_state.processing_complete = False
+if 'visual_greeted' not in st.session_state: st.session_state.visual_greeted = False
 
 # --- 2. CSS GENERATORS ---
 
@@ -52,6 +53,17 @@ def inject_visual_mode_css():
     .braille-display {
         font-size: 2.5rem; letter-spacing: 3px; font-weight: bold; color: #fff;
         text-align: center; margin: 15px 0; text-shadow: 0 0 10px rgba(255,255,255,0.5);
+    }
+    .raw-text-box {
+        font-family: 'Consolas', monospace;
+        font-size: 0.95rem;
+        color: #dcdcdc;
+        background-color: rgba(0,0,0,0.4);
+        padding: 15px;
+        border-radius: 8px;
+        max-height: 250px;
+        overflow-y: auto;
+        white-space: pre-wrap;
     }
     #MainMenu, footer, header {visibility: hidden;}
     </style>
@@ -84,13 +96,7 @@ def inject_reading_mode_css():
 # --- 3. HELPER FUNCTIONS ---
 
 def clean_text_for_audio(text):
-    """
-    Removes Markdown symbols so TTS reads smoothly.
-    Converts '* Item' to 'Item' and removes headers/bolding chars.
-    """
-    # Remove asterisks, hashes, dashes used for bullets
     clean = re.sub(r'[*#•-]', ' ', text)
-    # Remove multiple spaces
     clean = re.sub(r'\s+', ' ', clean).strip()
     return clean
 
@@ -102,7 +108,7 @@ def extract_text_with_gemini(image, mode):
         if mode == 'reading':
             prompt = """
             You are an assistive reading assistant.
-            1. Extract the text from the image.
+            1. Extract the FULL text from the image exactly. Do not truncate.
             2. REWRITE the content to be dyslexia-friendly:
                - Use short, simple sentences.
                - Use bullet points for key information.
@@ -117,7 +123,7 @@ def extract_text_with_gemini(image, mode):
         else:
             prompt = """
             You are an assistive reader for the visually impaired.
-            1. Extract the text exactly.
+            1. Extract the FULL text exactly as it appears in the image, without skipping anything.
             2. Provide a concise summary suitable for Text-to-Speech.
             
             Output Format:
@@ -152,7 +158,6 @@ def translate_to_braille(text):
 
 def text_to_tts_audio(text):
     try:
-        # CLEAN THE TEXT BEFORE SENDING TO TTS
         safe_text = clean_text_for_audio(text)
         if not safe_text: return ""
         
@@ -164,12 +169,12 @@ def text_to_tts_audio(text):
         return b64
     except: return ""
 
-# --- 4. JS COMPONENTS (FIXED COMMANDS) ---
+# --- 4. JS COMPONENTS (NUMBER MENU SYSTEM & IFRAME BRIDGE) ---
 
 def inject_gesture_interface():
     """
-    Visual Mode Interface with Voice & Gestures.
-    Fixed: 'Read', 'Next', 'Prev' commands.
+    Visual Mode Interface with IVR Number Voice Menu.
+    Includes BroadcastChannel to bridge iframes for audio playback.
     """
     js_code = """
     <div id="gesture-layer" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9999; background: rgba(0,0,0,0.01); touch-action: none;"></div>
@@ -177,7 +182,10 @@ def inject_gesture_interface():
     const layer = document.getElementById('gesture-layer');
     let lastTap = 0; let touchStartY = 0;
     
-    // Voice Command Engine
+    // Broadcast Channel to communicate with the Audio Player iframe
+    const bc = new BroadcastChannel('sensebridge_channel');
+    
+    // Voice Command Engine (IVR Number System)
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
@@ -188,18 +196,21 @@ def inject_gesture_interface():
             const cmd = e.results[e.results.length - 1][0].transcript.trim().toLowerCase();
             console.log("Command received:", cmd);
             
-            if (cmd.includes('scan') || cmd.includes('analyze')) triggerAction('upload');
-            
-            // FIXED: 'Read' or 'Start' triggers the audio player
-            if (cmd.includes('read') || cmd.includes('start') || cmd.includes('play')) triggerAction('play');
-            
-            if (cmd.includes('stop') || cmd.includes('pause')) triggerAction('pause');
-            
-            // FIXED: 'Next' and 'Previous' looking for buttons
-            if (cmd.includes('next') || cmd.includes('forward')) triggerAction('next');
-            if (cmd.includes('previous') || cmd.includes('back')) triggerAction('prev');
+            if (cmd.includes('1') || cmd === 'one') triggerAction('upload');
+            if (cmd.includes('2') || cmd === 'two' || cmd === 'to' || cmd === 'too') triggerAction('analyze');
+            if (cmd.includes('3') || cmd === 'three' || cmd === 'tree') triggerAction('play');
+            if (cmd.includes('4') || cmd === 'four' || cmd === 'for') triggerAction('pause');
+            if (cmd.includes('5') || cmd === 'five') triggerAction('next');
+            if (cmd.includes('6') || cmd === 'six') triggerAction('prev');
+            if (cmd.includes('7') || cmd === 'seven') triggerAction('exit');
         };
         try { recognition.start(); } catch(e) {}
+    }
+
+    function speak(text) {
+        window.speechSynthesis.cancel();
+        const utt = new SpeechSynthesisUtterance(text);
+        window.speechSynthesis.speak(utt);
     }
 
     // Gestures
@@ -210,24 +221,45 @@ def inject_gesture_interface():
     });
     layer.addEventListener('touchstart', e => { touchStartY = e.changedTouches[0].screenY; });
     layer.addEventListener('touchend', e => {
-        if (e.changedTouches[0].screenY < touchStartY - 50) triggerAction('upload');
-        if (e.changedTouches[0].screenY > touchStartY + 50) parent.window.location.reload();
+        if (e.changedTouches[0].screenY < touchStartY - 50) triggerAction('analyze');
+        if (e.changedTouches[0].screenY > touchStartY + 50) triggerAction('exit');
     });
 
     function triggerAction(action) {
         const btns = window.parent.document.querySelectorAll('button');
-        const audio = window.parent.document.querySelector('audio');
         
-        // Button Logic
-        if (action === 'upload') btns.forEach(b => { if(b.innerText.includes('Analyze')) b.click(); });
+        if (action === 'upload') {
+            const uploader = window.parent.document.querySelector('input[type="file"]');
+            if(uploader) { uploader.focus(); uploader.click(); }
+        }
         
-        if (action === 'next') btns.forEach(b => { if(b.innerText.toLowerCase().includes('next')) b.click(); });
-        if (action === 'prev') btns.forEach(b => { if(b.innerText.toLowerCase().includes('prev')) b.click(); });
+        if (action === 'analyze') {
+            speak("Analyzing document.");
+            btns.forEach(b => { if(b.textContent.includes('Analyze')) b.click(); });
+        }
+        
+        // Iframe Bridge for Audio Controls (Commands 3 & 4)
+        if (action === 'play') {
+            bc.postMessage('play'); // Send command to other iframe
+            try { if(window.parent.senseAudio) window.parent.senseAudio.play(); } catch(err) {} // Fallback
+        }
+        
+        if (action === 'pause') {
+            speak("Paused.");
+            bc.postMessage('pause');
+            try { if(window.parent.senseAudio) window.parent.senseAudio.pause(); } catch(err) {} // Fallback
+        }
+        
+        // Navigation Commands (Commands 5 & 6)
+        if (action === 'next') btns.forEach(b => { if(b.textContent.includes('Next')) b.click(); });
+        if (action === 'prev') btns.forEach(b => { if(b.textContent.includes('Prev')) b.click(); });
+        
+        // Exit Command (7)
+        if (action === 'exit') {
+            speak("Exiting Visual Mode.");
+            btns.forEach(b => { if(b.textContent.includes('Change Mode')) b.click(); });
+        }
 
-        // Audio Logic
-        if (action === 'play' && audio) audio.play();
-        if (action === 'pause' && audio) audio.paused ? audio.play() : audio.pause();
-        
         if (navigator.vibrate) navigator.vibrate(50);
     }
     </script>
@@ -235,7 +267,6 @@ def inject_gesture_interface():
     components.html(js_code, height=0, width=0)
 
 def render_karaoke_player(summary_text, audio_b64, mode='visual'):
-    # We clean text for display if in reading mode to match audio
     display_text = summary_text.replace("*", "").replace("#", "")
     words = display_text.split()
     
@@ -253,6 +284,18 @@ def render_karaoke_player(summary_text, audio_b64, mode='visual'):
     </div>
     <script>
         var aud = document.getElementById("summaryAudio");
+        
+        // Listeners for cross-iframe Voice Commands (Play/Pause)
+        const bc = new BroadcastChannel('sensebridge_channel');
+        bc.onmessage = (event) => {{
+            if (event.data === 'play') aud.play();
+            if (event.data === 'pause') aud.pause();
+        }};
+        
+        // Fallback global assignment
+        try {{ window.parent.senseAudio = aud; }} catch(e) {{}}
+        
+        // Karaoke Highlighting logic
         var len = {len(words)};
         aud.ontimeupdate = function() {{
             if(aud.duration>0){{
@@ -287,6 +330,7 @@ def show_mode_selection():
     with c1:
         if st.button("👁️ Visual Assist Mode\n(Audio, Braille, Haptics)", use_container_width=True):
             st.session_state.mode = 'visual'
+            st.session_state.visual_greeted = False
             st.rerun()
     with c2:
         if st.button("📖 Reading Assist Mode\n(Dyslexia Friendly, Simplified)", use_container_width=True):
@@ -297,10 +341,18 @@ def show_visual_interface():
     inject_visual_mode_css()
     inject_gesture_interface()
     
+    if not st.session_state.visual_greeted:
+        greeting = "Visual assist mode activated. Say 1 to upload. Say 2 to analyze. Say 3 to play audio. Say 4 to stop. Say 5 for next sentence. Say 6 for previous sentence. Say 7 to exit."
+        audio_b64 = text_to_tts_audio(greeting)
+        if audio_b64:
+            st.markdown(f'<audio src="data:audio/mp3;base64,{audio_b64}" autoplay></audio>', unsafe_allow_html=True)
+            st.session_state.visual_greeted = True
+    
     st.markdown('<div style="text-align: center; margin-bottom: 20px;"><h2>👁️ Visual Assist Active</h2></div>', unsafe_allow_html=True)
     
     if st.button("⬅️ Change Mode"):
         st.session_state.mode = None
+        st.session_state.processing_complete = False
         st.rerun()
 
     uploaded_file = st.file_uploader("📂 Upload Document", type=["jpg", "png"], label_visibility="collapsed")
@@ -318,7 +370,8 @@ def show_visual_interface():
     if st.session_state.processing_complete:
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown(f'<div class="sentinel-card"><div class="card-title" style="color:#bd93f9">📄 Extracted Text</div><div style="color:#ccc">{st.session_state.raw_text[:500]}...</div></div>', unsafe_allow_html=True)
+            # FIXED: Displays the FULL raw text inside a scrollable box instead of truncating at [:500]
+            st.markdown(f'<div class="sentinel-card"><div class="card-title" style="color:#bd93f9">📄 Extracted Text</div><div class="raw-text-box">{st.session_state.raw_text}</div></div>', unsafe_allow_html=True)
             tts = text_to_tts_audio(st.session_state.full_summary)
             render_karaoke_player(st.session_state.full_summary, tts, 'visual')
         
@@ -336,7 +389,6 @@ def show_visual_interface():
             """, unsafe_allow_html=True)
             
             c_p, c_n = st.columns(2)
-            # IMPORTANT: Text must match JS logic 'Prev' and 'Next'
             if c_p.button("⬅️ Prev"): 
                 if idx > 0: st.session_state.current_sentence_index -= 1; st.rerun()
             if c_n.button("Next ➡️"): 
@@ -349,6 +401,7 @@ def show_reading_interface():
     
     if st.button("⬅️ Change Mode"):
         st.session_state.mode = None
+        st.session_state.processing_complete = False
         st.rerun()
 
     uploaded_file = st.file_uploader("📂 Upload Document", type=["jpg", "png"])
